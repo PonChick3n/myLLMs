@@ -13,11 +13,11 @@ class HeadAttention(nn.Module):
         self.W_k = nn.Linear(emb_size, head_size)
         self.W_q = nn.Linear(emb_size, head_size)
         self.W_v = nn.Linear(emb_size, head_size)
-        self.mask = torch.tril(torch.ones(max_seq_len, max_seq_len))
+        self.register_buffer('mask', torch.tril(torch.ones(max_seq_len, max_seq_len)))
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         seq_len = x.shape[1]
-        trimmed_mask = self.mask[:seq_len, :seq_len]
+        trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
         
         key = self.W_k(x)
         query = self.W_q(x)
@@ -25,8 +25,7 @@ class HeadAttention(nn.Module):
               
         attention = query @ key.transpose(-2, -1)
         attention = attention / math.sqrt(self.head_size)
-        attention = attention * trimmed_mask
-        attention = attention.masked_fill(attention == 0, float('-inf'))
+        attention = attention.masked_fill(trimmed_mask == 0, float('-inf'))
         attention = torch.softmax(attention, dim=-1)
         
         out = attention @ value
