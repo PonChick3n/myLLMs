@@ -90,12 +90,12 @@ class GPT(nn.Module):
             self.train()
             train_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [train]')
             for inputs, targets in train_bar:
+                inputs = inputs.to(self.device)
+                targets = targets.to(self.device)
+                
                 logits = self(inputs)
                 logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                 targets = targets.flatten()
-
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
                 loss = loss_func(logits, targets)
                 
                 optimizer.zero_grad()
@@ -108,12 +108,12 @@ class GPT(nn.Module):
             valid_bar = tqdm(valid_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [valid]')
             with torch.no_grad():
                 for inputs, targets in valid_bar:
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
+
                     logits = self(inputs)
                     logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                     targets = targets.flatten()
-                    
-                    inputs = inputs.to(self.device)
-                    targets = targets.to(self.device)
                     loss = loss_func(logits, targets)
 
                     valid_bar.set_postfix(loss=loss.item())
