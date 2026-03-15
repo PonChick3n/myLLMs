@@ -24,7 +24,7 @@ class GPT(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         token_emb = self.token_emb(x)
-        pos_emb = self.pos_emb(x.shape[1])
+        pos_emb = self.pos_emb(x)
         emb = token_emb + pos_emb
         emb = self.dropout(emb)
         out = self.decoders(emb)
