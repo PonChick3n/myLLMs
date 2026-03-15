@@ -93,6 +93,9 @@ class GPT(nn.Module):
                 logits = self(inputs)
                 logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                 targets = targets.flatten()
+
+                inputs = inputs.to(self.device)
+                targets = targets.to(self.device)
                 loss = loss_func(logits, targets)
                 
                 optimizer.zero_grad()
@@ -108,6 +111,9 @@ class GPT(nn.Module):
                     logits = self(inputs)
                     logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                     targets = targets.flatten()
+                    
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
                     loss = loss_func(logits, targets)
 
                     valid_bar.set_postfix(loss=loss.item())
