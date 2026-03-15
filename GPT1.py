@@ -98,6 +98,8 @@ class GPT(nn.Module):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+                train_bar.set_postfix(loss=loss.item())
             
             self.eval()
             valid_bar = tqdm(valid_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [valid]')
@@ -107,4 +109,6 @@ class GPT(nn.Module):
                     logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                     targets = targets.flatten()
                     loss = loss_func(logits, targets)
+
+                    valid_bar.set_postfix(loss=loss.item())
                     
