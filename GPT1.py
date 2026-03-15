@@ -4,6 +4,7 @@ import torch.utils.data as data
 import torch.optim as optim
 from embeddings import TokenEmbeddings, PositionalEmbeddings
 from decoder import Decoder
+from tqdm.auto import tqdm
 
 
 class GPT(nn.Module):
@@ -84,28 +85,26 @@ class GPT(nn.Module):
         optimizer = optim.Adam(params=self.parameters(), lr=learning_rate)
         loss_func = nn.CrossEntropyLoss()
         
-        train_losses = []
-        valid_losses = []
-        for _ in range(num_epoch):
+        for epoch in range(num_epoch):
             
             self.train()
-            for inputs, targets in train_loader:
+            train_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [train]')
+            for inputs, targets in train_bar:
                 logits = self(inputs)
                 logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                 targets = targets.flatten()
                 loss = loss_func(logits, targets)
-                train_losses.append(loss.item())
                 
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
             
             self.eval()
+            valid_bar = tqdm(valid_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [valid]')
             with torch.no_grad():
-                for inputs, targets in valid_loader:
+                for inputs, targets in valid_bar:
                     logits = self(inputs)
                     logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                     targets = targets.flatten()
                     loss = loss_func(logits, targets)
-                    valid_losses.append(loss.item())
                     
