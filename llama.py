@@ -2,43 +2,31 @@ import torch
 import torch.nn as nn
 import torch.utils.data as data
 import torch.optim as optim
-from embeddings import TokenEmbeddings, PositionalEmbeddings
+from embeddings import TokenEmbeddings, RoPE
 from decoder import Decoder
 from tqdm.auto import tqdm
 from decoder import MultiHeadCache
 
 
-class GPT2(nn.Module):
+class Llama(nn.Module):
     
     def __init__(self, vocab_size: int, max_seq_len: int, emb_size: int, num_heads: int, head_size: int, num_layers: int,
                 dropout: float=0.1, device: str='cpu') -> None:
         super().__init__()
         
+        rope = RoPE(head_size, max_seq_len)
         self.max_seq_len = max_seq_len
         self.token_emb = TokenEmbeddings(vocab_size, emb_size)
-        self.pos_emb = PositionalEmbeddings(max_seq_len, emb_size)
         self.dropout = nn.Dropout(dropout)
         self.device = device
-        self.decoders = nn.ModuleList(Decoder(num_heads, emb_size, head_size, max_seq_len, dropout) for _ in range(num_layers))
+        self.decoders = nn.ModuleList(Decoder(num_heads, emb_size, head_size, max_seq_len, rope, dropout) for _ in range(num_layers))
         self.linear = nn.Linear(emb_size, vocab_size)
-        self.norm = nn.LayerNorm(emb_size)
+        self.norm = nn.RMSNorm(emb_size)
         self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, x: torch.Tensor, use_cache: bool=True,
                 cache: list[MultiHeadCache] | None=None) -> tuple[torch.Tensor, list[MultiHeadCache] | None]:
-        token_emb = self.token_emb(x)
-        
-        if cache is not None:
-            last_layer_cache = cache[-1]
-            last_head_cache = last_layer_cache[-1]
-            key_tensor = last_head_cache[0]        
-            start_pos = key_tensor.shape[1] % self.max_seq_len
-            pos_emb = self.pos_emb(x, start_pos)
-        else:
-            pos_emb = self.pos_emb(x)
-            
-        pos_emb = pos_emb.unsqueeze(0)
-        emb = token_emb + pos_emb
+        emb = self.token_emb(x)                    
         emb = self.dropout(emb)
         
         new_cache = []
@@ -99,40 +87,40 @@ class GPT2(nn.Module):
         return x
     
     def fit(self, train_loader: data.DataLoader, valid_loader: data.DataLoader, num_epoch: int, learning_rate: float) -> None:
-        self.to(self.device)
-        optimizer = optim.Adam(params=self.parameters(), lr=learning_rate)
-        loss_func = nn.CrossEntropyLoss()
-        
-        for epoch in range(num_epoch):
+            self.to(self.device)
+            optimizer = optim.Adam(params=self.parameters(), lr=learning_rate)
+            loss_func = nn.CrossEntropyLoss()
             
-            self.train()
-            train_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [train]')
-            for inputs, targets in train_bar:
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
+            for epoch in range(num_epoch):
                 
-                logits = self(inputs)
-                logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
-                targets = targets.flatten()
-                loss = loss_func(logits, targets)
-                
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                train_bar.set_postfix(loss=loss.item())
-            
-            self.eval()
-            valid_bar = tqdm(valid_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [valid]')
-            with torch.no_grad():
-                for inputs, targets in valid_bar:
+                self.train()
+                train_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [train]')
+                for inputs, targets in train_bar:
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
-
+                    
                     logits = self(inputs)
                     logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                     targets = targets.flatten()
                     loss = loss_func(logits, targets)
+                    
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
 
-                    valid_bar.set_postfix(loss=loss.item())
+                    train_bar.set_postfix(loss=loss.item())
+                
+                self.eval()
+                valid_bar = tqdm(valid_loader, desc=f'Epoch {epoch + 1}/{num_epoch} [valid]')
+                with torch.no_grad():
+                    for inputs, targets in valid_bar:
+                        inputs = inputs.to(self.device)
+                        targets = targets.to(self.device)
+
+                        logits = self(inputs)
+                        logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
+                        targets = targets.flatten()
+                        loss = loss_func(logits, targets)
+
+                        valid_bar.set_postfix(loss=loss.item())
                     

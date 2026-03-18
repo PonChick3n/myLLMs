@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import math
+from embeddings import RoPE
 
 
 HeadCache = tuple[torch.Tensor, torch.Tensor]
@@ -9,8 +10,9 @@ MultiHeadCache = list[HeadCache]
 
 class HeadAttention(nn.Module):
     
-    def __init__(self, emb_size: int, head_size: int, max_seq_len: int) -> None:
+    def __init__(self, emb_size: int, head_size: int, max_seq_len: int, rope: RoPE) -> None:
         super().__init__()
+        
         self.emb_size = emb_size
         self.head_size = head_size
         self.max_seq_len = max_seq_len
@@ -18,6 +20,7 @@ class HeadAttention(nn.Module):
         self.W_q = nn.Linear(emb_size, head_size)
         self.W_v = nn.Linear(emb_size, head_size)
         self.register_buffer('mask', torch.tril(torch.ones(max_seq_len, max_seq_len)))
+        self.rope = rope
     
     def forward(self, x: torch.Tensor, use_cache: bool=True,
                 cache: HeadCache | None=None) -> tuple[torch.Tensor, HeadCache | None]:
@@ -27,6 +30,16 @@ class HeadAttention(nn.Module):
         key = self.W_k(x)
         query = self.W_q(x)
         value = self.W_v(x)
+        
+        if cache is not None:
+            cached_len = cache[0].shape[1]
+            start_pos = cached_len
+        else:
+            start_pos = 0
+        
+        if self.rope is not None:
+            query = self.rope(query, start_pos)
+            key = self.rope(key, start_pos)
         
         if cache is not None:
             key = torch.cat([cache[0], key], dim=1)
@@ -51,7 +64,7 @@ class HeadAttention(nn.Module):
 
 class MultiHeadAttention(nn.Module):
     
-    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, dropout: float=0.1) -> None:
+    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, rope: RoPE, dropout: float=0.1) -> None:
         super().__init__()
         self.num_heads = num_heads
         self.emb_size = emb_size
@@ -59,7 +72,7 @@ class MultiHeadAttention(nn.Module):
         self.max_seq_len = max_seq_len
         self.dropout = dropout
         
-        self.heads = nn.ModuleList([HeadAttention(emb_size, head_size, max_seq_len) for _ in range(num_heads)])
+        self.heads = nn.ModuleList([HeadAttention(emb_size, head_size, max_seq_len, rope) for _ in range(num_heads)])
         self.layer = nn.Linear(head_size * num_heads, emb_size)
         self.dropout = nn.Dropout(dropout)
         
@@ -83,33 +96,40 @@ class MultiHeadAttention(nn.Module):
         
         return out, None
     
-    
-class FeedForward(nn.Module):
+
+class SwiGLU(nn.Module):
     
     def __init__(self, emb_size: int, dropout: float=0.1) -> None:
         super().__init__()
         
-        self.emb_size = emb_size
-        self.pipeline = nn.Sequential(
-            nn.Linear(emb_size, 4 * emb_size),                          
-            nn.GELU(),
-            nn.Linear(4 * emb_size, emb_size),
-            nn.Dropout(dropout)
-        )
-    
+        self.gate = nn.Linear(emb_size, 4 * emb_size)
+        self.up = nn.Linear(emb_size, 4 * emb_size)
+        self.down = nn.Linear(4 * emb_size, emb_size)
+        self.silu = nn.SiLU()
+        self.dropout = nn.Dropout(dropout)
+        
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.pipeline(x)     
-
+        gated = self.gate(x)
+        gated = self.silu(gated)
+        
+        x = self.up(x)
+        x = x * gated
+        
+        x = self.down(x)
+        x = self.dropout(x)
+        
+        return x
+         
     
 class Decoder(nn.Module):
      
-    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, dropout: float=0.1) -> None:
+    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, rope: RoPE, dropout: float=0.1) -> None:
         super().__init__()
         
-        self.multihead = MultiHeadAttention(num_heads, emb_size, head_size, max_seq_len, dropout)
-        self.feedforward = FeedForward(emb_size, dropout)
-        self.norm1 = nn.LayerNorm(emb_size)
-        self.norm2 = nn.LayerNorm(emb_size)
+        self.multihead = MultiHeadAttention(num_heads, emb_size, head_size, max_seq_len, rope, dropout)
+        self.swiglu = SwiGLU(emb_size, dropout)
+        self.norm1 = nn.RMSNorm(emb_size)
+        self.norm2 = nn.RMSNorm(emb_size)
     
     def forward(self, x: torch.Tensor, use_cache: bool=True,
                 cache: MultiHeadCache | None=None) -> tuple[torch.Tensor, MultiHeadCache | None]:
@@ -120,7 +140,7 @@ class Decoder(nn.Module):
 
         residual = x
         x = self.norm2(x)
-        x = self.feedforward(x)
+        x = self.swiglu(x)
         x = x + residual
 
         if use_cache:
