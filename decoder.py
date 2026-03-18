@@ -106,16 +106,49 @@ class SwiGLU(nn.Module):
         x = self.dropout(x)
         
         return x
+    
+
+class MoE(nn.Module):
+    
+    def __init__(self, emb_size: int, num_experts: int, top_k_experts: int, dropout: float=0.1) -> None:
+        super().__init__()
+        self.num_experts = num_experts
+        self.top_k_experts = top_k_experts
+        self.router = nn.Linear(emb_size, num_experts)
+        self.experts = nn.ModuleList([SwiGLU(emb_size, dropout) for _ in range(num_experts)])
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        logits = self.router(x)
+        values, indices = torch.topk(logits, self.top_k_experts, dim=-1)
+        probs = torch.softmax(values, dim=-1)
+        out = torch.zeros_like(x)
+
+        for i in range(self.num_experts):
+            mask = (indices == i)
+            if not mask.any():
+                continue
+
+            token_mask = mask.any(dim=-1)
+            x_i = x[token_mask]
+            expert_out = self.experts[i](x_i)
+            prob_i = probs[mask]
+            prob_i = prob_i.unsqueeze(-1)
+            expert_out = expert_out * prob_i
+            out[token_mask] += expert_out
+
+        out = self.dropout(out)
+        return out
          
     
 class Decoder(nn.Module):
      
     def __init__(self, num_q_heads: int, num_kv_heads: int, emb_size: int, head_size: int, max_seq_len: int,
-                rope: RoPE, window_size: int, dropout: float=0.1) -> None:
+                rope: RoPE, num_experts: int, top_k_experts: int, window_size: int, dropout: float=0.1) -> None:
         super().__init__()
         
         self.grouped = GroupedQueryAttention(num_q_heads, num_kv_heads, emb_size, head_size, max_seq_len, rope, window_size, dropout)
-        self.swiglu = SwiGLU(emb_size, dropout)
+        self.moe = MoE(emb_size, num_experts, top_k_experts, dropout)
         self.norm1 = nn.RMSNorm(emb_size)
         self.norm2 = nn.RMSNorm(emb_size)
     
@@ -128,7 +161,7 @@ class Decoder(nn.Module):
 
         residual = x
         x = self.norm2(x)
-        x = self.swiglu(x)
+        x = self.moe(x)
         x = x + residual
 
         if use_cache:

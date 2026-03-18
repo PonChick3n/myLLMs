@@ -8,10 +8,10 @@ from tqdm.auto import tqdm
 from decoder import HeadCache
 
 
-class Mistral(nn.Module):
+class Mixtral(nn.Module):
         
     def __init__(self, vocab_size: int, max_seq_len: int, emb_size: int, num_q_heads: int, num_kv_heads: int, head_size: int, num_layers: int,
-                dropout: float=0.1, window_size: int=4096, device: str='cpu') -> None:
+                num_experts: int, top_k_experts: int, dropout: float=0.1, window_size: int=4096, device: str='cpu') -> None:
         super().__init__()
         
         rope = RoPE(head_size, max_seq_len)
@@ -19,7 +19,7 @@ class Mistral(nn.Module):
         self.token_emb = TokenEmbeddings(vocab_size, emb_size)
         self.dropout = nn.Dropout(dropout)
         self.device = device
-        self.decoders = nn.ModuleList(Decoder(num_q_heads, num_kv_heads, emb_size, head_size, max_seq_len, rope, window_size, dropout) for _ in range(num_layers))
+        self.decoders = nn.ModuleList(Decoder(num_q_heads, num_kv_heads, emb_size, head_size, max_seq_len, rope, num_experts, top_k_experts, window_size, dropout) for _ in range(num_layers))
         self.linear = nn.Linear(emb_size, vocab_size)
         self.norm = nn.RMSNorm(emb_size)
         self.softmax = nn.Softmax(dim=-1)
