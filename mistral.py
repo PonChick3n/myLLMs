@@ -5,13 +5,13 @@ import torch.optim as optim
 from embeddings import TokenEmbeddings, RoPE
 from decoder import Decoder
 from tqdm.auto import tqdm
-from decoder import MultiHeadCache
+from decoder import HeadCache
 
 
-class Llama(nn.Module):
-    
-    def __init__(self, vocab_size: int, max_seq_len: int, emb_size: int, num_heads: int, head_size: int, num_layers: int,
-                dropout: float=0.1, device: str='cpu') -> None:
+class Mistral(nn.Module):
+        
+    def __init__(self, vocab_size: int, max_seq_len: int, emb_size: int, num_q_heads: int, num_kv_heads: int, head_size: int, num_layers: int,
+                dropout: float=0.1, window_size: int=4096, device: str='cpu') -> None:
         super().__init__()
         
         rope = RoPE(head_size, max_seq_len)
@@ -19,13 +19,13 @@ class Llama(nn.Module):
         self.token_emb = TokenEmbeddings(vocab_size, emb_size)
         self.dropout = nn.Dropout(dropout)
         self.device = device
-        self.decoders = nn.ModuleList(Decoder(num_heads, emb_size, head_size, max_seq_len, rope, dropout) for _ in range(num_layers))
+        self.decoders = nn.ModuleList(Decoder(num_q_heads, num_kv_heads, emb_size, head_size, max_seq_len, rope, window_size, dropout) for _ in range(num_layers))
         self.linear = nn.Linear(emb_size, vocab_size)
         self.norm = nn.RMSNorm(emb_size)
         self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, x: torch.Tensor, use_cache: bool=True,
-                cache: list[MultiHeadCache] | None=None) -> tuple[torch.Tensor, list[MultiHeadCache] | None]:
+                cache: list[HeadCache] | None=None) -> tuple[torch.Tensor, list[HeadCache] | None]:
         emb = self.token_emb(x)                    
         emb = self.dropout(emb)
         

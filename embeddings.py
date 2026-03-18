@@ -36,10 +36,10 @@ class RoPE(nn.Module):
         
         
     def forward(self, x: torch.Tensor, start_pos: int=0) -> torch.Tensor:
-        seq_len = x.shape[1]
+        seq_len = x.shape[2]
         
-        sines = self.sines[start_pos:start_pos + seq_len].unsqueeze(0) # type: ignore
-        cosines = self.cosines[start_pos:start_pos + seq_len].unsqueeze(0) # type: ignore
+        sines = self.sines[start_pos:start_pos + seq_len].unsqueeze(0).unsqueeze(0) # type: ignore
+        cosines = self.cosines[start_pos:start_pos + seq_len].unsqueeze(0).unsqueeze(0) # type: ignore
         
         x_even = x[..., ::2]
         x_odd = x[..., 1::2]
