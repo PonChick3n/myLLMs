@@ -7,10 +7,9 @@ from decoder import Decoder
 from tqdm.auto import tqdm
 
 
-class GPT(nn.Module):
-       
-    def __init__(self, vocab_size: int, max_seq_len: int, emb_size: int, num_heads: int, head_size: int, num_layers: int,
-                 dropout: float=0.1, device: str='cpu') -> None:
+class GPT2(nn.Module):
+    
+    def __init__(self, vocab_size, max_seq_len, emb_size, num_heads, head_size, num_layers, dropout=0.1, device='cpu'):
         super().__init__()
         
         self.max_seq_len = max_seq_len
@@ -18,32 +17,46 @@ class GPT(nn.Module):
         self.pos_emb = PositionalEmbeddings(max_seq_len, emb_size)
         self.dropout = nn.Dropout(dropout)
         self.device = device
-        self.decoders = nn.Sequential(*[Decoder(num_heads, emb_size, head_size, max_seq_len, dropout) for _ in range(num_layers)])
+        self.decoders = nn.ModuleList(Decoder(num_heads, emb_size, head_size, max_seq_len, dropout) for _ in range(num_layers))
         self.linear = nn.Linear(emb_size, vocab_size)
+        self.norm = nn.LayerNorm(emb_size)
         self.softmax = nn.Softmax(dim=-1)
         
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, use_cache=True, cache=None):
         token_emb = self.token_emb(x)
-        pos_emb = self.pos_emb(x)
+        
+        if cache is not None:
+            last_layer_cache = cache[-1]
+            last_head_cache = last_layer_cache[-1]
+            key_tensor = last_head_cache[0]        
+            start_pos = key_tensor.shape[1] % self.max_seq_len
+            pos_emb = self.pos_emb(1, start_pos)
+        else:
+            pos_emb = self.pos_emb(x.shape[1])
+            
+        pos_emb = pos_emb.unsqueeze(0)
         emb = token_emb + pos_emb
         emb = self.dropout(emb)
-        out = self.decoders(emb)
+        
+        new_cache = []
+        for i, decoder in enumerate(self.decoders):
+            layer_cache = cache[i] if cache is not None else None
+            emb, layer_cache = decoder(emb, use_cache, layer_cache)
+            new_cache.append(layer_cache)
+        
+        out = self.norm(emb)
         out = self.linear(out)
         
-        return out
+        if use_cache:
+            return out, new_cache
+        
+        return out, None
     
-    def generate(self, x: torch.Tensor, max_new_tokens: int, do_sample: bool, top_k: int=None, top_p: float=None,
-                 temperature: float=1.0) -> torch.Tensor:
-        input_seq_len = x.shape[1]
-        full_sequence = x.clone()
-    
-        if input_seq_len > self.max_seq_len:
-            current_input = x[:, -self.max_seq_len:]
-        else:
-            current_input = x
-    
+    def generate(self, x, max_new_tokens, do_sample, top_k=None, top_p=None, temperature=1.0, use_cache=True):
+        cache = None
+        x_input = x
         for _ in range(max_new_tokens):
-            logits = self.forward(current_input)
+            logits, cache = self.forward(x_input, use_cache, cache)
             logits = logits[:, -1, :] / temperature
 
             if top_k is not None and top_k > 0:
@@ -72,13 +85,14 @@ class GPT(nn.Module):
             else:
                 next_token = torch.argmax(probs, dim=-1, keepdim=True)
                 
-            full_sequence = torch.cat([full_sequence, next_token], dim=1)
-            current_input = torch.cat([current_input, next_token], dim=1)
-        
-            if current_input.shape[1] > self.max_seq_len:
-                current_input = current_input[:, -self.max_seq_len:]
-    
-        return full_sequence
+            if use_cache:
+                x_input = next_token
+            else:
+                x_input = torch.cat([x, next_token], dim=1)
+
+            x = torch.cat([x, next_token], dim=1)
+            
+        return x
     
     def fit(self, train_loader: data.DataLoader, valid_loader: data.DataLoader, num_epoch: int, learning_rate: float) -> None:
         self.to(self.device)
