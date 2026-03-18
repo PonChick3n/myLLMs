@@ -5,11 +5,13 @@ import torch.optim as optim
 from embeddings import TokenEmbeddings, PositionalEmbeddings
 from decoder import Decoder
 from tqdm.auto import tqdm
+from decoder import MultiHeadCache
 
 
 class GPT2(nn.Module):
     
-    def __init__(self, vocab_size, max_seq_len, emb_size, num_heads, head_size, num_layers, dropout=0.1, device='cpu'):
+    def __init__(self, vocab_size: int, max_seq_len: int, emb_size: int, num_heads: int, head_size: int, num_layers: int,
+                dropout: float=0.1, device: str='cpu') -> None:
         super().__init__()
         
         self.max_seq_len = max_seq_len
@@ -22,7 +24,8 @@ class GPT2(nn.Module):
         self.norm = nn.LayerNorm(emb_size)
         self.softmax = nn.Softmax(dim=-1)
         
-    def forward(self, x, use_cache=True, cache=None):
+    def forward(self, x: torch.Tensor, use_cache: bool=True,
+                cache: list[MultiHeadCache] | None=None) -> tuple[torch.Tensor, list[MultiHeadCache] | None]:
         token_emb = self.token_emb(x)
         
         if cache is not None:
@@ -30,9 +33,9 @@ class GPT2(nn.Module):
             last_head_cache = last_layer_cache[-1]
             key_tensor = last_head_cache[0]        
             start_pos = key_tensor.shape[1] % self.max_seq_len
-            pos_emb = self.pos_emb(1, start_pos)
+            pos_emb = self.pos_emb(x, start_pos)
         else:
-            pos_emb = self.pos_emb(x.shape[1])
+            pos_emb = self.pos_emb(x)
             
         pos_emb = pos_emb.unsqueeze(0)
         emb = token_emb + pos_emb
@@ -52,7 +55,8 @@ class GPT2(nn.Module):
         
         return out, None
     
-    def generate(self, x, max_new_tokens, do_sample, top_k=None, top_p=None, temperature=1.0, use_cache=True):
+    def generate(self, x: torch.Tensor, max_new_tokens: int, do_sample: bool, top_k: int=None, top_p: float=None,
+                 temperature: float=1.0, use_cache: bool=True) -> torch.Tensor:
         cache = None
         x_input = x
         for _ in range(max_new_tokens):

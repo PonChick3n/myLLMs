@@ -3,9 +3,13 @@ import torch.nn as nn
 import math
 
 
+HeadCache = tuple[torch.Tensor, torch.Tensor]
+MultiHeadCache = list[HeadCache]
+
+
 class HeadAttention(nn.Module):
     
-    def __init__(self, emb_size, head_size, max_seq_len):
+    def __init__(self, emb_size: int, head_size: int, max_seq_len: int) -> None:
         super().__init__()
         self.emb_size = emb_size
         self.head_size = head_size
@@ -15,7 +19,8 @@ class HeadAttention(nn.Module):
         self.W_v = nn.Linear(emb_size, head_size)
         self.register_buffer('mask', torch.tril(torch.ones(max_seq_len, max_seq_len)))
     
-    def forward(self, x, use_cache=True, cache=None):
+    def forward(self, x: torch.Tensor, use_cache: bool=True,
+                cache: HeadCache | None=None) -> tuple[torch.Tensor, HeadCache | None]:
         seq_len = x.shape[1]
         trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
         
@@ -46,7 +51,7 @@ class HeadAttention(nn.Module):
 
 class MultiHeadAttention(nn.Module):
     
-    def __init__(self, num_heads, emb_size, head_size, max_seq_len, dropout=0.1):
+    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, dropout: float=0.1) -> None:
         super().__init__()
         self.num_heads = num_heads
         self.emb_size = emb_size
@@ -58,7 +63,8 @@ class MultiHeadAttention(nn.Module):
         self.layer = nn.Linear(head_size * num_heads, emb_size)
         self.dropout = nn.Dropout(dropout)
         
-    def forward(self, x, use_cache=True, cache=None):
+    def forward(self, x: torch.Tensor, use_cache: bool=True,
+                cache: MultiHeadCache | None=None) -> tuple[torch.Tensor, MultiHeadCache | None]:
         outs = []
         new_cache = []
 
@@ -80,7 +86,7 @@ class MultiHeadAttention(nn.Module):
     
 class FeedForward(nn.Module):
     
-    def __init__(self, emb_size, dropout=0.1):
+    def __init__(self, emb_size: int, dropout: float=0.1) -> None:
         super().__init__()
         
         self.emb_size = emb_size
@@ -91,13 +97,13 @@ class FeedForward(nn.Module):
             nn.Dropout(dropout)
         )
     
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.pipeline(x)     
 
     
 class Decoder(nn.Module):
      
-    def __init__(self, num_heads, emb_size, head_size, max_seq_len, dropout=0.1):
+    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, dropout: float=0.1) -> None:
         super().__init__()
         
         self.multihead = MultiHeadAttention(num_heads, emb_size, head_size, max_seq_len, dropout)
@@ -105,7 +111,8 @@ class Decoder(nn.Module):
         self.norm1 = nn.LayerNorm(emb_size)
         self.norm2 = nn.LayerNorm(emb_size)
     
-    def forward(self, x, use_cache=True, cache=None):
+    def forward(self, x: torch.Tensor, use_cache: bool=True,
+                cache: MultiHeadCache | None=None) -> tuple[torch.Tensor, MultiHeadCache | None]:
         residual = x
         x = self.norm1(x)
         x, new_cache = self.multihead(x, use_cache, cache)
