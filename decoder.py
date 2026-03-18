@@ -5,112 +5,85 @@ from embeddings import RoPE
 
 
 HeadCache = tuple[torch.Tensor, torch.Tensor]
-MultiHeadCache = list[HeadCache]
 
 
-class HeadAttention(nn.Module):
-    
-    def __init__(self, emb_size: int, head_size: int, max_seq_len: int, rope: RoPE) -> None:
+class MultiQueryAttention(nn.Module):
+
+    def __init__(self, num_q_heads: int, emb_size: int, head_size: int, max_seq_len: int, rope: RoPE, dropout: float=0.1) -> None:
         super().__init__()
-        
+        self.num_q_heads = num_q_heads
         self.emb_size = emb_size
         self.head_size = head_size
         self.max_seq_len = max_seq_len
-        self.W_k = nn.Linear(emb_size, head_size)
-        self.W_q = nn.Linear(emb_size, head_size)
-        self.W_v = nn.Linear(emb_size, head_size)
-        self.register_buffer('mask', torch.tril(torch.ones(max_seq_len, max_seq_len)))
         self.rope = rope
-    
+
+        self.W_q = nn.Linear(emb_size, num_q_heads * head_size)
+        self.W_k = nn.Linear(emb_size, head_size)
+        self.W_v = nn.Linear(emb_size, head_size)
+
+        mask = torch.tril(torch.ones(max_seq_len, max_seq_len))
+        self.register_buffer('mask', mask)
+
+        self.layer = nn.Linear(num_q_heads * head_size, emb_size)
+        self.dropout = nn.Dropout(dropout)
+
     def forward(self, x: torch.Tensor, use_cache: bool=True,
                 cache: HeadCache | None=None) -> tuple[torch.Tensor, HeadCache | None]:
-        seq_len = x.shape[1]
-        trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
-        
-        key = self.W_k(x)
-        query = self.W_q(x)
-        value = self.W_v(x)
-        
+        batch_size, seq_len, _ = x.shape
+
+        query = self.W_q(x).view(batch_size, seq_len, self.num_q_heads, self.head_size).transpose(1, 2)
+        key = self.W_k(x).view(batch_size, seq_len, 1, self.head_size).transpose(1, 2)
+        value = self.W_v(x).view(batch_size, seq_len, 1, self.head_size).transpose(1, 2)
+
         if cache is not None:
-            cached_len = cache[0].shape[1]
-            start_pos = cached_len
+            start_pos = cache[0].shape[2]
         else:
             start_pos = 0
-        
+
         if self.rope is not None:
             query = self.rope(query, start_pos)
             key = self.rope(key, start_pos)
-        
+
         if cache is not None:
-            key = torch.cat([cache[0], key], dim=1)
-            value = torch.cat([cache[1], value], dim=1)
-              
+            key = torch.cat([cache[0], key], dim=2)
+            value = torch.cat([cache[1], value], dim=2)
+
         attention = query @ key.transpose(-2, -1)
         attention = attention / math.sqrt(self.head_size)
-        
+
         if cache is None:
+            trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
             attention = attention.masked_fill(trimmed_mask == 0, float('-inf'))
-            
+
         attention = torch.softmax(attention, dim=-1)
-        
-        out = attention @ value
-        
-        if use_cache:
-            new_cache = (key, value)
-            return out, new_cache
-            
-        return out, None
 
+        out = (attention @ value).transpose(1, 2).contiguous().view(
+            batch_size, seq_len, self.num_q_heads * self.head_size
+        )
 
-class MultiHeadAttention(nn.Module):
-    
-    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, rope: RoPE, dropout: float=0.1) -> None:
-        super().__init__()
-        self.num_heads = num_heads
-        self.emb_size = emb_size
-        self.head_size = head_size
-        self.max_seq_len = max_seq_len
-        self.dropout = dropout
-        
-        self.heads = nn.ModuleList([HeadAttention(emb_size, head_size, max_seq_len, rope) for _ in range(num_heads)])
-        self.layer = nn.Linear(head_size * num_heads, emb_size)
-        self.dropout = nn.Dropout(dropout)
-        
-    def forward(self, x: torch.Tensor, use_cache: bool=True,
-                cache: MultiHeadCache | None=None) -> tuple[torch.Tensor, MultiHeadCache | None]:
-        outs = []
-        new_cache = []
-
-        for i, head in enumerate(self.heads):
-            head_cache = None if cache is None else cache[i]
-            out, c = head(x, use_cache, head_cache)
-            outs.append(out)
-            new_cache.append(c)
-
-        out = torch.cat(outs, dim=-1)
         out = self.layer(out)
-        out = self.dropout(out) # type: ignore
+        out = self.dropout(out)
 
         if use_cache:
-            return out, new_cache
+            return out, (key, value)
         
         return out, None
     
 
-class SwiGLU(nn.Module):
+class GeGLU(nn.Module):
     
-    def __init__(self, emb_size: int, dropout: float=0.1) -> None:
+    def __init__(self, emb_size: int, dropout: float=0.1):
         super().__init__()
         
         self.gate = nn.Linear(emb_size, 4 * emb_size)
         self.up = nn.Linear(emb_size, 4 * emb_size)
         self.down = nn.Linear(4 * emb_size, emb_size)
-        self.silu = nn.SiLU()
+        self.gelu = nn.GELU()
         self.dropout = nn.Dropout(dropout)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gated = self.gate(x)
-        gated = self.silu(gated)
+        gated = self.gelu(gated)
         
         x = self.up(x)
         x = x * gated
@@ -123,24 +96,24 @@ class SwiGLU(nn.Module):
     
 class Decoder(nn.Module):
      
-    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, rope: RoPE, dropout: float=0.1) -> None:
+    def __init__(self, num_q_heads: int, emb_size: int, head_size: int, max_seq_len: int, rope: RoPE, dropout: float=0.1) -> None:
         super().__init__()
         
-        self.multihead = MultiHeadAttention(num_heads, emb_size, head_size, max_seq_len, rope, dropout)
-        self.swiglu = SwiGLU(emb_size, dropout)
+        self.grouped = MultiQueryAttention(num_q_heads, emb_size, head_size, max_seq_len, rope, dropout)
+        self.geglu = GeGLU(emb_size, dropout)
         self.norm1 = nn.RMSNorm(emb_size)
         self.norm2 = nn.RMSNorm(emb_size)
     
     def forward(self, x: torch.Tensor, use_cache: bool=True,
-                cache: MultiHeadCache | None=None) -> tuple[torch.Tensor, MultiHeadCache | None]:
+                cache: HeadCache | None=None) -> tuple[torch.Tensor, HeadCache | None]:
         residual = x
         x = self.norm1(x)
-        x, new_cache = self.multihead(x, use_cache, cache)
+        x, new_cache = self.grouped(x, use_cache, cache)
         x = x + residual
 
         residual = x
         x = self.norm2(x)
-        x = self.swiglu(x)
+        x = self.geglu(x)
         x = x + residual
 
         if use_cache:

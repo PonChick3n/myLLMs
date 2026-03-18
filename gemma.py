@@ -5,10 +5,10 @@ import torch.optim as optim
 from embeddings import TokenEmbeddings, RoPE
 from decoder import Decoder
 from tqdm.auto import tqdm
-from decoder import MultiHeadCache
+from decoder import HeadCache
 
 
-class Llama(nn.Module):
+class Gemma(nn.Module):
     
     def __init__(self, vocab_size: int, max_seq_len: int, emb_size: int, num_heads: int, head_size: int, num_layers: int,
                 dropout: float=0.1, device: str='cpu') -> None:
@@ -25,7 +25,7 @@ class Llama(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, x: torch.Tensor, use_cache: bool=True,
-                cache: list[MultiHeadCache] | None=None) -> tuple[torch.Tensor, list[MultiHeadCache] | None]:
+                cache: list[HeadCache] | None=None) -> tuple[torch.Tensor, list[HeadCache] | None]:
         emb = self.token_emb(x)                    
         emb = self.dropout(emb)
         
