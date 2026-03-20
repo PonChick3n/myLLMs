@@ -22,7 +22,6 @@ class HeadAttention(nn.Module):
     def forward(self, x: torch.Tensor, use_cache: bool=True,
                 cache: HeadCache | None=None) -> tuple[torch.Tensor, HeadCache | None]:
         seq_len = x.shape[1]
-        trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
         
         key = self.W_k(x)
         query = self.W_q(x)
@@ -36,6 +35,7 @@ class HeadAttention(nn.Module):
         attention = attention / math.sqrt(self.head_size)
         
         if cache is None:
+            trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
             attention = attention.masked_fill(trimmed_mask == 0, float('-inf'))
             
         attention = torch.softmax(attention, dim=-1)
