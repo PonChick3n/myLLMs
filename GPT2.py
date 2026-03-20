@@ -3,9 +3,8 @@ import torch.nn as nn
 import torch.utils.data as data
 import torch.optim as optim
 from embeddings import TokenEmbeddings, PositionalEmbeddings
-from decoder import Decoder
+from decoder import Decoder, MultiHeadCache
 from tqdm.auto import tqdm
-from decoder import MultiHeadCache
 
 
 class GPT2(nn.Module):
