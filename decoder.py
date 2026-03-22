@@ -35,8 +35,12 @@ class HeadAttention(nn.Module):
         attention = attention / math.sqrt(self.head_size)
         
         if cache is None:
-            trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
-            attention = attention.masked_fill(trimmed_mask == 0, float('-inf'))
+            if seq_len <= self.max_seq_len:
+                trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
+                attention = attention.masked_fill(trimmed_mask == 0, float('-inf'))
+            else:
+                causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device))
+                attention = attention.masked_fill(causal_mask == 0, float('-inf'))
             
         attention = torch.softmax(attention, dim=-1)
         
