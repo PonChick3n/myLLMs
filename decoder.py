@@ -21,29 +21,32 @@ class HeadAttention(nn.Module):
     
     def forward(self, x: torch.Tensor, use_cache: bool=True,
                 cache: HeadCache | None=None) -> tuple[torch.Tensor, HeadCache | None]:
-        seq_len = x.shape[1]
-        
         key = self.W_k(x)
         query = self.W_q(x)
         value = self.W_v(x)
         
         if cache is not None:
-            key = torch.cat([cache[0], key], dim=1)
-            value = torch.cat([cache[1], value], dim=1)
+            key = torch.cat([cache[0], key], dim=-2)
+            value = torch.cat([cache[1], value], dim=-2)
               
         attention = query @ key.transpose(-2, -1)
         attention = attention / math.sqrt(self.head_size)
         
         if cache is None:
-            if seq_len <= self.max_seq_len:
-                trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
-                attention = attention.masked_fill(trimmed_mask == 0, float('-inf'))
+            k_len = key.size(-2)
+            q_len = query.size(-2)
+
+            if k_len <= self.max_seq_len:
+                mask = self.mask[:q_len, :k_len] # type: ignore
             else:
-                causal_mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device))
-                attention = attention.masked_fill(causal_mask == 0, float('-inf'))
+                mask = torch.tril(torch.ones(q_len, k_len, device=x.device))
+
+            while mask.dim() < attention.dim():
+                mask = mask.unsqueeze(0)
+
+            attention = attention.masked_fill(mask == 0, float('-inf'))
             
-        attention = torch.softmax(attention, dim=-1)
-        
+        attention = torch.softmax(attention, dim=-1) 
         out = attention @ value
         
         if use_cache:
