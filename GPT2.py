@@ -110,7 +110,7 @@ class GPT2(nn.Module):
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
                 
-                logits = self(inputs)
+                logits, _ = self(inputs, use_cache=False)
                 logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                 targets = targets.flatten()
                 loss = loss_func(logits, targets)
@@ -128,7 +128,7 @@ class GPT2(nn.Module):
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
 
-                    logits = self(inputs)
+                    logits, _ = self(inputs, use_cache=False)
                     logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
                     targets = targets.flatten()
                     loss = loss_func(logits, targets)
