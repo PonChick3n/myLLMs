@@ -49,10 +49,20 @@ class HeadAttention(nn.Module):
         attention = attention / math.sqrt(self.head_size)
         
         if cache is None:
-            attention = attention.masked_fill(trimmed_mask == 0, float('-inf'))
+            k_len = key.size(-2)
+            q_len = query.size(-2)
+
+            if k_len <= self.max_seq_len:
+                mask = self.mask[:q_len, :k_len] # type: ignore
+            else:
+                mask = torch.tril(torch.ones(q_len, k_len, device=x.device))
+
+            while mask.dim() < attention.dim():
+                mask = mask.unsqueeze(0)
+
+            attention = attention.masked_fill(mask == 0, float('-inf'))
             
         attention = torch.softmax(attention, dim=-1)
-        
         out = attention @ value
         
         if use_cache:
