@@ -52,15 +52,21 @@ class MultiQueryAttention(nn.Module):
         attention = attention / math.sqrt(self.head_size)
 
         if cache is None:
-            trimmed_mask = self.mask[:seq_len, :seq_len] # type: ignore
-            attention = attention.masked_fill(trimmed_mask == 0, float('-inf'))
+            k_len = key.size(-2)
+            q_len = query.size(-2)
+
+            if k_len <= self.max_seq_len:
+                mask = self.mask[:q_len, :k_len] # type: ignore
+            else:
+                mask = torch.tril(torch.ones(q_len, k_len, device=x.device))
+
+            while mask.dim() < attention.dim():
+                mask = mask.unsqueeze(0)
+
+            attention = attention.masked_fill(mask == 0, float('-inf'))
 
         attention = torch.softmax(attention, dim=-1)
-
-        out = (attention @ value).transpose(1, 2).contiguous().view(
-            batch_size, seq_len, self.num_q_heads * self.head_size
-        )
-
+        out = (attention @ value).transpose(1, 2).contiguous().view(batch_size, seq_len, self.num_q_heads * self.head_size)
         out = self.layer(out)
         out = self.dropout(out)
 
@@ -120,3 +126,4 @@ class Decoder(nn.Module):
             return x, new_cache
         
         return x, None
+    
