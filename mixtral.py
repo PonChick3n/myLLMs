@@ -3,9 +3,8 @@ import torch.nn as nn
 import torch.utils.data as data
 import torch.optim as optim
 from embeddings import TokenEmbeddings, RoPE
-from decoder import Decoder
+from decoder import Decoder, HeadCache
 from tqdm.auto import tqdm
-from decoder import HeadCache
 
 
 class Mixtral(nn.Module):
@@ -99,9 +98,10 @@ class Mixtral(nn.Module):
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
                     
-                    logits = self(inputs)
-                    logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
-                    targets = targets.flatten()
+                    logits, _ = self(inputs, use_cache=False)
+                    batch, seq, vocab = logits.shape
+                    logits = logits.reshape(batch * seq, vocab)
+                    targets = targets.reshape(batch * seq)
                     loss = loss_func(logits, targets)
                     
                     optimizer.zero_grad()
@@ -117,9 +117,10 @@ class Mixtral(nn.Module):
                         inputs = inputs.to(self.device)
                         targets = targets.to(self.device)
 
-                        logits = self(inputs)
-                        logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
-                        targets = targets.flatten()
+                        logits, _ = self(inputs, use_cache=False)
+                        batch, seq, vocab = logits.shape
+                        logits = logits.reshape(batch * seq, vocab)
+                        targets = targets.reshape(batch * seq)
                         loss = loss_func(logits, targets)
 
                         valid_bar.set_postfix(loss=loss.item())
