@@ -31,12 +31,11 @@ class GPT2(nn.Module):
             last_layer_cache = cache[-1]
             last_head_cache = last_layer_cache[-1]
             key_tensor = last_head_cache[0]        
-            start_pos = key_tensor.shape[1] % self.max_seq_len
+            start_pos = key_tensor.shape[-2] % self.max_seq_len
             pos_emb = self.pos_emb(x, start_pos)
         else:
             pos_emb = self.pos_emb(x)
             
-        pos_emb = pos_emb.unsqueeze(0)
         emb = token_emb + pos_emb
         emb = self.dropout(emb)
         
@@ -111,8 +110,9 @@ class GPT2(nn.Module):
                 targets = targets.to(self.device)
                 
                 logits, _ = self(inputs, use_cache=False)
-                logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
-                targets = targets.flatten()
+                batch, seq, vocab = logits.shape
+                logits = logits.reshape(batch * seq, vocab)
+                targets = targets.reshape(batch * seq)
                 loss = loss_func(logits, targets)
                 
                 optimizer.zero_grad()
@@ -129,8 +129,9 @@ class GPT2(nn.Module):
                     targets = targets.to(self.device)
 
                     logits, _ = self(inputs, use_cache=False)
-                    logits = logits.view(logits.shape[0] * logits.shape[1], logits.shape[2])
-                    targets = targets.flatten()
+                    batch, seq, vocab = logits.shape
+                    logits = logits.reshape(batch * seq, vocab)
+                    targets = targets.reshape(batch * seq)
                     loss = loss_func(logits, targets)
 
                     valid_bar.set_postfix(loss=loss.item())
